@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environments
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Data
+data/raw/*
+data/processed/*
+!data/raw/README.md
+!data/processed/README.md
+
+# Databases
+*.db
+*.sqlite
+
+# OS
+.DS_Store
