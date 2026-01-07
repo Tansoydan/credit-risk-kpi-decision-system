@@ -1,1 +1,3 @@
-Raw datasets go here (not committed to Git).
+Dataset downloaded from:
+https://www.kaggle.com/datasets/wordsforthewise/lending-club
+
