@@ -1,102 +1,127 @@
-# Credit Risk & KPI Decision System
+# Credit Risk & PD Decision System
 
-An end-to-end credit analytics project that transforms raw loan-level data into **credit approval decisions** using SQL-based KPIs, probabilistic risk modelling, and portfolio simulation.
+An end-to-end credit analytics project that transforms raw loan-level data into **credit approval decisions** using SQL-based KPIs, probabilistic risk modelling, and portfolio-level policy simulation.
 
-The project mirrors how a real credit risk or analytics team would work:
-- start with raw data ingestion and governance,
-- build robust KPI views,
-- train a leakage-safe Probability of Default (PD) model,
-- translate PDs into approval policies and portfolio trade-offs.
+The project mirrors how a real credit risk or analytics team would operate:  
+start with governed data and KPIs, build a leakage-safe Probability of Default (PD) model, and translate model outputs into concrete approval policies with measurable portfolio impact.
 
 ---
 
-## Workflow Overview
+## Project Overview
 
-### 1) Data inspection (`01_data_inspection.ipynb`)
-- Inspect schema, missingness, and data quality
-- Validate date ranges and string-encoded numeric fields
-- Identify columns suitable for modelling vs reporting
+**Objectives**
+- Build a production-style analytics workflow using SQL and Python
+- Estimate loan-level Probability of Default (PD)
+- Compare PD-based approval policies against traditional grade cut-offs
+- Quantify trade-offs between approval rate, default risk, and expected loss
+
+**Tech Stack**
+- Python (pandas, scikit-learn, matplotlib)
+- SQL (SQLite)
+- Jupyter notebooks
+- BI-ready outputs (CSV + visuals)
 
 ---
 
-### 2) SQL staging & cleaning (`02_sql_staging_and_cleaning.ipynb`)
-- Chunk-load raw CSV into SQLite (`raw_loans`)
-- Create a typed, engineered table (`clean_loans`)
-- Key transformations:
+## Workflow Summary
+
+### 1) Data inspection
+Initial exploration of schema, missingness, date ranges, and string-encoded numeric fields (interest rate, utilisation, employment length).
+
+### 2) SQL staging & cleaning
+- Raw CSV chunk-loaded into SQLite
+- Clean, typed `clean_loans` table created
+- Feature engineering:
   - `term` → `term_months`
-  - `emp_length` → `emp_length_yrs`
-  - month strings (e.g. `Dec-2018`) → ISO dates (`YYYY-MM-01`)
-  - `fico_avg` derived from FICO ranges
-- Indexing added for fast KPI queries
+  - `emp_length` → numeric years
+  - Month strings → ISO dates
+  - Average FICO score derived
+- Indexes added for KPI performance
 
----
-
-### 3) KPI layer (`03_kpi_credit_risk.ipynb`)
-Defines governance-ready credit KPIs:
-- Portfolio volume, exposure, average rate & term
-- Default (bad) rate by **grade** and **sub-grade**
+### 3) KPI layer
+Business-facing credit KPIs built directly in SQL:
+- Portfolio exposure, average loan size, rate, and term
+- Default rates by grade and sub-grade
 - Vintage (issue-year) performance
-- Rule-based approval policies (A–B, A–C, A–D)
+- Rule-based grade approval policies
 
 **Default definition (realised outcomes only):**
-- Bad/default: `Charged Off`, `Default`
-- Good: `Fully Paid`
-- Excluded: `Current`, `Late`, `In Grace Period`
-
-KPI tables are exported to `data/kpi/` for BI use.
+- Default: `Charged Off`, `Default`
+- Non-default: `Fully Paid`
+- Ongoing loans excluded
 
 ---
 
-### 4) PD modelling (`04_pd_modelling.ipynb`)
-Builds a leakage-safe **Probability of Default** model.
+### 4) PD modelling
+A leakage-safe baseline PD model was trained using application-time features only.
 
 **Model**
-- Logistic Regression (interpretable baseline)
+- Logistic regression
 - Median imputation (numeric)
 - Most-frequent + one-hot encoding (categorical)
+- Time-based train/test split to reflect real deployment
 
-**Key modelling choices**
-- Application-time features only (no leakage)
-- Time-based train/test split (earlier vs later vintages)
+**Performance (test set)**
+- ROC-AUC ≈ **0.70**
+- Brier score ≈ **0.16**
+- Stable calibration across most of the PD range
 
-**Performance (example run)**
-- Test ROC-AUC ≈ 0.70  
-- Test Brier score ≈ 0.16  
-- Calibration curve close to diagonal with mild high-risk drift
+#### PD distribution (test set)
+![PD distribution](visuals/pd_distribution_test.png)
 
-PD scores are written back to SQLite in:
+The distribution shows most loans concentrated in the 5–25% PD range, with a long high-risk tail — supporting the use of continuous PD thresholds rather than coarse grade buckets.
+
+#### PD calibration (test set)
+![PD calibration](visuals/pd_calibration_test.png)
+
+Predicted PDs track observed default rates closely, with mild under-prediction at the highest risk levels, consistent with time-based drift.
+
+---
+
+### 5) PD-based approval & policy simulation
+PD predictions were written back to SQLite and used to simulate approval policies on the out-of-sample test set.
+
+Three PD-based policies were evaluated:
+- **Conservative:** PD < 10%
+- **Balanced:** PD < 15%
+- **Growth:** PD < 20%
+
+These were compared directly against traditional grade cut-offs (A–B, A–C, A–D).
+
+#### Policy frontier: PD vs grade
+![Policy frontier](visuals/policy_frontier_pd_vs_grade.png)
+
+PD-based thresholds form a superior risk–reward frontier, delivering lower default and loss rates at comparable approval levels.
+
+---
+
+## Key Results (Test Set)
+
+- **PD < 10%** approves ~25% of applicants with ~8% realised default rate  
+- **PD < 15%** approves ~49% with ~12.5% realised default rate  
+- **PD < 20%** approves ~66% with ~15% realised default rate  
+
+In contrast, grade-based policies approve substantially more loans but with materially higher default and expected loss rates.
+
+**Core insight:**  
+Grade cut-offs pool heterogeneous risk within discrete buckets. PD-based decisioning enables continuous, transparent control of portfolio risk and cleaner alignment with risk appetite.
 
 
 ---
 
-### 5) PD-based policy simulation (`05_pd_policy_simulation.ipynb`)
-Turns PDs into **approval decisions** and compares:
-- PD-threshold policies (e.g. PD < 10%, 15%, 20%)
-vs
-- Grade-based rules (A–B, A–C, A–D)
-
-Reported on the **out-of-sample test set**:
-- approval rate
-- realised default rate among approved loans
-- expected defaults (sum of PD)
-- expected loss proxy using a simple LGD assumption
-
-Simulation outputs are exported to `data/simulation/`.
+## Notes on Leakage
+Post-origination variables (repayments, recoveries, last payment dates) are explicitly excluded from PD modelling and used only for descriptive KPIs.
 
 ---
 
-## Key Insights
-
-- Default rates increase monotonically from grade A → G, validating underwriting logic
-- PD-based thresholds provide a smoother risk–approval trade-off than grade cut-offs
-- A balanced PD policy increases approval volume with a controlled rise in default risk
-- Separating **risk estimation (PD)** from **decision rules** improves transparency and control
+## Possible Extensions
+- PD calibration (Platt / isotonic)
+- Expected profit simulation (interest income vs expected loss)
+- Segmented LGD / EAD assumptions
+- Non-linear models (GBM) for comparison
+- Simple scoring function for new applicants
 
 ---
 
-## How to Run
-
-### Requirements
-- Python 3.10+
-- pandas, numpy, scikit-learn, matplotlib
-- sqlite3 (built-in)
+## Takeaway
+This project demonstrates how raw credit data can be transformed into **actionable approval decisions**, showing not just how to build models, but how to use them responsibly to manage portfolio risk.
